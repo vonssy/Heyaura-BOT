@@ -16,17 +16,22 @@ import asyncio, random, json, sys, re, os
 class heyAura:
     def __init__(self) -> None:
         self.BASE_API = "https://hub.heyaura.com"
-        self.WEB_ID = "402b4798-a24c-4c67-a9b9-2a8307ff5464"
-        self.ORG_ID = "5cb0be9a-6fae-45a9-a1a8-b23812cb9732"
-        self.RULES_ID = "84a975a2-873e-4463-9738-70b1cf0abc31"
+
+        self.IDS = {
+            "website": "402b4798-a24c-4c67-a9b9-2a8307ff5464",
+            "organization": "5cb0be9a-6fae-45a9-a1a8-b23812cb9732",
+            "checkin_rules": "84a975a2-873e-4463-9738-70b1cf0abc31",
+        }
+        
         self.REF_CODE = "97QHKWPY" # U can change it with yours.
+
         self.USE_PROXY = False
         self.ROTATE_PROXY = False
-        self.HEADERS = {}
+        
         self.proxies = []
         self.proxy_index = 0
         self.account_proxies = {}
-        self.header_cookies = {}
+        self.accounts = {}
         
         self.USER_AGENTS = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -151,37 +156,40 @@ class heyAura:
 
         return proxy_url
     
-    def extract_cookies(self, address, response, jar=SimpleCookie()):
-        if address in self.header_cookies:
-            jar.load(self.header_cookies[address])
-
+    def extract_cookies(self, address: str, response: object):
+        existing = self.accounts[address].get("cookies", {})
+        
+        jar = SimpleCookie()
+        
+        for k, v in existing.items():
+            jar[k] = v
+        
         for h in response.headers.getall("Set-Cookie", []):
             jar.load(h)
+        
+        self.accounts[address]["cookies"] = {
+            k: m.value for k, m in jar.items()
+        }
 
-        jar["referral_code"] = self.REF_CODE
-
-        self.header_cookies[address] = "; ".join(f"{k}={m.value}" for k, m in jar.items())
-
-        return self.header_cookies[address]
+        return self.accounts[address]["cookies"]
     
     def initialize_headers(self, address: str):
-        if address not in self.HEADERS:
-            self.HEADERS[address] = {
-                "Accept": "*/*",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Cache-Control": "no-cache",
-                "Origin": "https://hub.heyaura.com",
-                "Pragma": "no-cache",
-                "Referer": "https://hub.heyaura.com/community",
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-origin",
-                "User-Agent": random.choice(self.USER_AGENTS)
-            }
+        headers = {
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cache-Control": "no-cache",
+            "Origin": "https://hub.heyaura.com",
+            "Pragma": "no-cache",
+            "Referer": "https://hub.heyaura.com/community",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "User-Agent": self.accounts[address]["user_agent"]
+        }
 
-        return self.HEADERS[address].copy()
-        
+        return headers.copy()
+    
     def generate_address(self, private_key: str):
         try:
             account = Account.from_key(private_key)
@@ -311,10 +319,13 @@ class heyAura:
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                cookies = self.accounts[address].get("cookies", {})
                 headers = self.initialize_headers(address)
 
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.get(url=url, headers=headers, proxy=proxy, proxy_auth=proxy_auth) as response:
+                    async with session.get(
+                        url=url, headers=headers, cookies=cookies, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
                         await self.ensure_ok(response)
                         self.extract_cookies(address, response)
                         return await response.json()
@@ -337,14 +348,16 @@ class heyAura:
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                cookies = self.accounts[address].get("cookies", {})
                 headers = self.initialize_headers(address)
-                headers["Cookie"] = self.header_cookies[address]
                 headers["Content-Type"] = "application/json"
                 headers["X-Requested-With"] = "XMLHttpRequest"
                 payload = self.generate_payload(private_key, address, csrf_token)
 
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, json=payload, proxy=proxy, proxy_auth=proxy_auth) as response:
+                    async with session.post(
+                        url=url, headers=headers, json=payload, cookies=cookies, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
                         await self.ensure_ok(response)
                         self.extract_cookies(address, response)
                         return True
@@ -367,16 +380,18 @@ class heyAura:
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                cookies = self.accounts[address].get("cookies", {})
                 headers = self.initialize_headers(address)
-                headers["Cookie"] = self.header_cookies[address]
                 params = {
-                    "websiteId": self.WEB_ID, 
-                    "organizationId": self.ORG_ID, 
+                    "websiteId": self.IDS["website"], 
+                    "organizationId": self.IDS["organization"], 
                     "walletAddress": address
                 }
                 
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.get(url=url, headers=headers, params=params, proxy=proxy, proxy_auth=proxy_auth) as response:
+                    async with session.get(
+                        url=url, headers=headers, params=params, cookies=cookies, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
                         await self.ensure_ok(response)
                         return await response.json()
             except (Exception, ClientResponseError) as e:
@@ -393,17 +408,19 @@ class heyAura:
         return None
     
     async def complete_checkin(self, address: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/api/loyalty/rules/{self.RULES_ID}/complete"
+        url = f"{self.BASE_API}/api/loyalty/rules/{self.IDS['checkin_rules']}/complete"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                cookies = self.accounts[address].get("cookies", {})
                 headers = self.initialize_headers(address)
-                headers["Cookie"] = self.header_cookies[address]
                 headers["Content-Type"] = "application/json"
                 
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, proxy=proxy, proxy_auth=proxy_auth) as response:
+                    async with session.post(
+                        url=url, headers=headers, cookies=cookies, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
                         result = await response.json()
 
                         if response.status == 400:
@@ -532,6 +549,12 @@ class heyAura:
                     address = self.generate_address(private_key)
                     if not address: continue
 
+                    if address not in self.accounts:
+                        self.accounts[address] = {
+                            "cookies": {"referral_code": self.REF_CODE},
+                            "user_agent": random.choice(self.USER_AGENTS)
+                        }
+
                     self.log(
                         f"{Fore.CYAN+Style.BRIGHT}Address :{Style.RESET_ALL}"
                         f"{Fore.WHITE+Style.BRIGHT} {self.mask_account(address)} {Style.RESET_ALL}"
@@ -540,7 +563,7 @@ class heyAura:
                     await self.process_accounts(private_key, address)
                     await asyncio.sleep(random.uniform(2.0, 3.0))
 
-                self.log(f"{Fore.CYAN + Style.BRIGHT}={Style.RESET_ALL}"*72)
+                self.log(f"{Fore.CYAN + Style.BRIGHT}={Style.RESET_ALL}"*60)
                 
                 delay = 24 * 60 * 60
                 while delay > 0:
@@ -548,7 +571,7 @@ class heyAura:
                     print(
                         f"{Fore.CYAN+Style.BRIGHT}[ Wait for{Style.RESET_ALL}"
                         f"{Fore.WHITE+Style.BRIGHT} {formatted_time} {Style.RESET_ALL}"
-                        f"{Fore.CYAN+Style.BRIGHT}... ]{Style.RESET_ALL}"
+                        f"{Fore.CYAN+Style.BRIGHT}]{Style.RESET_ALL}"
                         f"{Fore.WHITE+Style.BRIGHT} | {Style.RESET_ALL}"
                         f"{Fore.BLUE+Style.BRIGHT}All Accounts Have Been Processed...{Style.RESET_ALL}",
                         end="\r",

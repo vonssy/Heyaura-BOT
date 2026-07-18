@@ -9,21 +9,13 @@ from http.cookies import SimpleCookie
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_utils import to_hex
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from colorama import *
 import asyncio, random, json, sys, re, os
 
 class heyAura:
     def __init__(self) -> None:
         self.BASE_API = "https://hub.heyaura.com"
-
-        self.IDS = {
-            "website": "402b4798-a24c-4c67-a9b9-2a8307ff5464",
-            "organization": "5cb0be9a-6fae-45a9-a1a8-b23812cb9732",
-            "checkin_rules": "84a975a2-873e-4463-9738-70b1cf0abc31",
-        }
-        
-        self.REF_CODE = "97QHKWPY" # U can change it with yours.
 
         self.USE_PROXY = False
         self.ROTATE_PROXY = False
@@ -32,6 +24,7 @@ class heyAura:
         self.proxy_index = 0
         self.account_proxies = {}
         self.accounts = {}
+        self.props = {}
         
         self.USER_AGENTS = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -155,6 +148,15 @@ class heyAura:
             proxy_url = proxy_url.split("@", 1)[1]
 
         return proxy_url
+    
+    def get_next_run_time(self, anchor_minute=1):
+        now = datetime.now(timezone.utc)
+        today_target = now.replace(hour=0, minute=anchor_minute, second=0, microsecond=0)
+
+        if today_target > now:
+            return today_target
+        else:
+            return today_target + timedelta(days=1)
     
     def extract_cookies(self, address: str, response: object):
         existing = self.accounts[address].get("cookies", {})
@@ -313,14 +315,43 @@ class heyAura:
         
         return None
     
+    async def websites_props(self, address: str, proxy_url=None, retries=5):
+        url = f"{self.BASE_API}/api/props/websites"
+        
+        for attempt in range(retries):
+            connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
+            try:
+                headers = self.initialize_headers(address)
+                cookies = self.accounts[address].get("cookies", {})
+
+                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                    async with session.get(
+                        url=url, headers=headers, cookies=cookies, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
+                        self.extract_cookies(address, response)
+                        return await response.json()
+            except (Exception, ClientResponseError) as e:
+                if attempt < retries - 1:
+                    await asyncio.sleep(5)
+                    continue
+                self.log(
+                    f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Failed to Fetch Web Props {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
+                )
+
+        return None
+    
     async def auth_csrf(self, address: str, proxy_url=None, retries=5):
         url = f"{self.BASE_API}/api/auth/csrf"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
-                cookies = self.accounts[address].get("cookies", {})
                 headers = self.initialize_headers(address)
+                cookies = self.accounts[address].get("cookies", {})
 
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(
@@ -348,15 +379,15 @@ class heyAura:
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
-                cookies = self.accounts[address].get("cookies", {})
                 headers = self.initialize_headers(address)
                 headers["Content-Type"] = "application/json"
                 headers["X-Requested-With"] = "XMLHttpRequest"
+                cookies = self.accounts[address].get("cookies", {})
                 payload = self.generate_payload(private_key, address, csrf_token)
 
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.post(
-                        url=url, headers=headers, json=payload, cookies=cookies, proxy=proxy, proxy_auth=proxy_auth
+                        url=url, headers=headers, cookies=cookies, json=payload, proxy=proxy, proxy_auth=proxy_auth
                     ) as response:
                         await self.ensure_ok(response)
                         self.extract_cookies(address, response)
@@ -374,23 +405,23 @@ class heyAura:
 
         return None
 
-    async def loyality_account(self, address: str, proxy_url=None, retries=5):
+    async def loyality_accounts(self, address: str, proxy_url=None, retries=5):
         url = f"{self.BASE_API}/api/loyalty/accounts"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
-                cookies = self.accounts[address].get("cookies", {})
                 headers = self.initialize_headers(address)
+                cookies = self.accounts[address].get("cookies", {})
                 params = {
-                    "websiteId": self.IDS["website"], 
-                    "organizationId": self.IDS["organization"], 
+                    "websiteId": self.props["web_id"], 
+                    "organizationId": self.props["org_id"], 
                     "walletAddress": address
                 }
                 
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(
-                        url=url, headers=headers, params=params, cookies=cookies, proxy=proxy, proxy_auth=proxy_auth
+                        url=url, headers=headers, cookies=cookies, params=params, proxy=proxy, proxy_auth=proxy_auth
                     ) as response:
                         await self.ensure_ok(response)
                         return await response.json()
@@ -406,20 +437,56 @@ class heyAura:
                 )
 
         return None
-    
-    async def complete_checkin(self, address: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/api/loyalty/rules/{self.IDS['checkin_rules']}/complete"
+
+    async def loyality_rules(self, address: str, proxy_url=None, retries=5):
+        url = f"{self.BASE_API}/api/loyalty/rules"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                headers = self.initialize_headers(address)
                 cookies = self.accounts[address].get("cookies", {})
+                params = {
+                    "limit": "100",
+                    "websiteId": self.props["web_id"], 
+                    "organizationId": self.props["org_id"], 
+                    "excludeHidden": "true",
+                    "excludeExpired": "true",
+                    "isActive": "true"
+                }
+                
+                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                    async with session.get(
+                        url=url, headers=headers, cookies=cookies, params=params, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
+                        return await response.json()
+            except (Exception, ClientResponseError) as e:
+                if attempt < retries - 1:
+                    await asyncio.sleep(5)
+                    continue
+                self.log(
+                    f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Failed to Fetch Rules Id {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
+                )
+
+        return None
+    
+    async def complete_checkin(self, address: str, rules_id: str, proxy_url=None, retries=5):
+        url = f"{self.BASE_API}/api/loyalty/rules/{rules_id}/complete"
+        
+        for attempt in range(retries):
+            connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
+            try:
                 headers = self.initialize_headers(address)
                 headers["Content-Type"] = "application/json"
+                cookies = self.accounts[address].get("cookies", {})
                 
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.post(
-                        url=url, headers=headers, cookies=cookies, proxy=proxy, proxy_auth=proxy_auth
+                        url=url, headers=headers, cookies=cookies, json={}, proxy=proxy, proxy_auth=proxy_auth
                     ) as response:
                         result = await response.json()
 
@@ -473,6 +540,22 @@ class heyAura:
         if self.USE_PROXY:
             proxy_url = self.get_next_proxy_for_account(address)
 
+        props = await self.websites_props(address, proxy_url)
+        if not props: return False
+
+        web_id = props.get("websiteId")
+        org_id = props.get("organizationId")
+
+        if not web_id or not org_id:
+            self.log(
+                f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
+                f"{Fore.YELLOW+Style.BRIGHT} Web/Org Id Not Found {Style.RESET_ALL}"
+            )
+            return False
+        
+        self.props["web_id"] = web_id
+        self.props["org_id"] = org_id
+
         auth_csrf = await self.auth_csrf(address, proxy_url)
         if not auth_csrf: return False
 
@@ -495,26 +578,41 @@ class heyAura:
         if self.USE_PROXY:
             proxy_url = self.get_next_proxy_for_account(address)
 
-        loyality = await self.loyality_account(address, proxy_url)
-        if loyality:
-            loyality_data = loyality.get("data", [])
+        accounts = await self.loyality_accounts(address, proxy_url)
+        if accounts:
+            accounts_data = accounts.get("data") or []
 
-            if loyality_data:
-                amount = loyality_data[0].get("amount", 0)
-            else:
-                amount = 0
+            amount = (
+                accounts_data[0].get("amount", 0)
+                if accounts_data and isinstance(accounts_data[0], dict)
+                else 0
+            )
 
             self.log(
                 f"{Fore.CYAN+Style.BRIGHT}Balance :{Style.RESET_ALL}"
                 f"{Fore.WHITE+Style.BRIGHT} {amount} Points {Style.RESET_ALL}"
             )
 
-        checkin = await self.complete_checkin(address, proxy_url)
-        if checkin:
-            self.log(
-                f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
-                f"{Fore.GREEN+Style.BRIGHT} Success {Style.RESET_ALL}"
+        rules = await self.loyality_rules(address, proxy_url)
+        if rules:
+            rules_data = rules.get("data") or []
+
+            rules_id = next(
+                (r.get("id") for r in rules_data if r.get("type") == "check_in" and r.get("claimType") == "manual"),
+                None,
             )
+
+            if rules_id:
+                if await self.complete_checkin(address, rules_id, proxy_url):
+                    self.log(
+                        f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
+                        f"{Fore.GREEN+Style.BRIGHT} Success {Style.RESET_ALL}"
+                    )
+            else:
+                self.log(
+                    f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} Rules Id Not Found {Style.RESET_ALL}"
+                )
 
     async def main(self):
         try:
@@ -537,7 +635,6 @@ class heyAura:
 
                 separator = "=" * 25
                 for idx, private_key in enumerate(accounts, start=1):
-
                     self.log(
                         f"{Fore.CYAN + Style.BRIGHT}{separator}[{Style.RESET_ALL}"
                         f"{Fore.WHITE + Style.BRIGHT} {idx} {Style.RESET_ALL}"
@@ -551,7 +648,6 @@ class heyAura:
 
                     if address not in self.accounts:
                         self.accounts[address] = {
-                            "cookies": {"referral_code": self.REF_CODE},
                             "user_agent": random.choice(self.USER_AGENTS)
                         }
 
@@ -565,9 +661,17 @@ class heyAura:
 
                 self.log(f"{Fore.CYAN + Style.BRIGHT}={Style.RESET_ALL}"*60)
                 
-                delay = 24 * 60 * 60
-                while delay > 0:
-                    formatted_time = self.format_seconds(delay)
+                next_run = self.get_next_run_time(anchor_minute=1)
+
+                while True:
+                    now = datetime.now(timezone.utc)
+                    remaining = (next_run - now).total_seconds()
+
+                    if remaining <= 0:
+                        break
+
+                    formatted_time = self.format_seconds(remaining)
+
                     print(
                         f"{Fore.CYAN+Style.BRIGHT}[ Wait for{Style.RESET_ALL}"
                         f"{Fore.WHITE+Style.BRIGHT} {formatted_time} {Style.RESET_ALL}"
@@ -578,7 +682,6 @@ class heyAura:
                         flush=True
                     )
                     await asyncio.sleep(1)
-                    delay -= 1
 
         except Exception as e:
             self.log(f"{Fore.RED+Style.BRIGHT}Error: {e}{Style.RESET_ALL}")

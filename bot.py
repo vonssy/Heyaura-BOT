@@ -6,16 +6,20 @@ from aiohttp import (
 )
 from aiohttp_socks import ProxyConnector
 from http.cookies import SimpleCookie
+from base64 import urlsafe_b64decode
 from eth_account import Account
-from eth_account.messages import encode_defunct
+from eth_account.messages import encode_defunct, encode_typed_data
 from eth_utils import to_hex
 from datetime import datetime, timedelta, timezone
 from colorama import *
-import asyncio, random, json, sys, re, os
+import asyncio, textwrap, random, string, time, json, sys, re, os
 
 class heyAura:
     def __init__(self) -> None:
-        self.BASE_API = "https://hub.heyaura.com"
+        self.API = {
+            "hub": "https://hub.heyaura.com",
+            "ai": "https://backend.heyaura.com"
+        }
 
         self.USE_PROXY = False
         self.ROTATE_PROXY = False
@@ -175,20 +179,37 @@ class heyAura:
 
         return self.accounts[address]["cookies"]
     
-    def initialize_headers(self, address: str):
-        headers = {
-            "Accept": "*/*",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Cache-Control": "no-cache",
-            "Origin": "https://hub.heyaura.com",
-            "Pragma": "no-cache",
-            "Referer": "https://hub.heyaura.com/community",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
-            "User-Agent": self.accounts[address]["user_agent"]
-        }
+    def initialize_headers(self, address: str, type: str = "hub"):
+        if type == "ai":
+            headers = {
+                "Accept": "*/*",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Cache-Control": "no-cache",
+                "Origin": "https://app.heyaura.com",
+                "Pragma": "no-cache",
+                "Referer": "https://app.heyaura.com/",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+                "User-Agent": self.accounts[address]["user_agent"]
+            }
+
+        else:
+            headers = {
+                "Accept": "*/*",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Cache-Control": "no-cache",
+                "Origin": "https://hub.heyaura.com",
+                "Pragma": "no-cache",
+                "Referer": "https://hub.heyaura.com/community",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-origin",
+                "User-Agent": self.accounts[address]["user_agent"]
+            }
+            
 
         return headers.copy()
     
@@ -206,7 +227,7 @@ class heyAura:
             )
             return None
         
-    def generate_payload(self, private_key: str, address: str, csrf_token: str):
+    def generate_hub_payload(self, private_key: str, address: str, csrf_token: str):
         try:
             dt_now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
             issued_at = dt_now.replace("+00:00", "Z")
@@ -254,6 +275,257 @@ class heyAura:
             return payload
         except Exception as e:
             raise Exception(f"Generate Req Payload Failed: {str(e)}")
+        
+    def generate_ai_payload(self, private_key: str, auth_message: str):
+        try:
+            encoded_message = encode_typed_data(full_message=auth_message)
+            signed_message = Account.sign_message(encoded_message, private_key=private_key)
+            signature = to_hex(signed_message.signature)
+
+            payload = {
+                "authMsg": auth_message,
+                "signature": signature,
+            }
+
+            return payload
+        except Exception as e:
+            raise Exception(f"Generate Req Payload Failed: {str(e)}")
+
+    def generate_prompt(self) -> str:
+        subjects = {
+            "wallet": [
+                "wallet balance",
+                "wallet address",
+                "connected wallet",
+                "wallet activity",
+                "wallet security",
+                "seed phrase safety",
+                "hardware wallet status",
+                "multi-sig wallet setup",
+                "existing token approvals",
+                "spending allowance",
+            ],
+            "network": [
+                "Ethereum mainnet",
+                "Arbitrum",
+                "Optimism",
+                "Base",
+                "Polygon",
+                "BNB Chain",
+                "current gas fees",
+                "network congestion",
+                "chain reorg risk",
+                "RPC endpoint status",
+            ],
+            "web3": [
+                "smart contract details",
+                "DeFi protocol activity",
+                "DEX liquidity pool position",
+                "yield farming position",
+                "staking position",
+                "lending protocol position",
+                "governance proposal status",
+                "smart contract risk",
+                "protocol TVL",
+            ],
+            "portfolio": [
+                "total portfolio value",
+                "asset allocation",
+                "portfolio performance",
+                "profit and loss",
+                "portfolio risk exposure",
+                "diversification",
+                "idle assets",
+                "portfolio history",
+            ],
+            "asset": [
+                "ERC-20 token holdings",
+                "stablecoin balance",
+                "native token balance",
+                "NFT collection",
+                "token price",
+                "token supply",
+                "dust token balance",
+                "token contract address",
+                "airdrop token eligibility",
+                "bridged asset status",
+            ],
+            "transaction": [
+                "pending transaction status",
+                "transaction fees",
+                "transaction history",
+                "failed transaction details",
+                "transaction confirmation status",
+            ],
+        }
+
+        predicates = [
+            "What is my {subject}?",
+            "Show me my {subject}",
+            "Check my {subject} right now",
+            "Explain how {subject} works",
+            "Is my {subject} at risk?",
+            "Compare my {subject} across chains",
+            "Alert me if {subject} changes significantly",
+            "Summarize my {subject} in simple terms",
+            "Why did my {subject} change recently?",
+            "What's the safest way to think about {subject}?",
+            "Track {subject} over the last 7 days",
+            "What should I know about {subject}?",
+        ]
+
+        general_subjects = [
+            "Explain {subject} to a beginner",
+            "What's the current status of {subject}?",
+            "Any risks I should know about {subject}?",
+        ]
+        
+        category = random.choice(list(subjects.keys()))
+        subject = random.choice(subjects[category])
+
+        if category in ("network", "web3"):
+            predicate_pool = predicates + general_subjects
+        else:
+            predicate_pool = predicates
+
+        predicate = random.choice(predicate_pool)
+        return predicate.format(subject=subject)
+    
+    def generate_chat_session_name(self, prompt: str):
+        now = datetime.now().strftime("%d/%m/%y %H:%M")
+        return prompt[:24] + " - " + now
+    
+    def generate_random_string(self, length: int = 16) -> str:
+        chars = string.ascii_letters + string.digits
+        return ''.join(random.choices(chars, k=length))
+    
+    def generate_submit_prompt_payload(self, address: str, prompt: str, session_id: str):
+        timestamp = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+        
+        return {
+            "prompt": prompt,
+            "userPrompt": prompt,
+            "threadId": session_id,
+            "sessionId": session_id,
+            "resourceId": address,
+            "messages": [
+                {
+                    "parts": [
+                        {
+                            "type": "text",
+                            "text": prompt
+                        }
+                    ],
+                    "id": self.generate_random_string(),
+                    "role": "user",
+                    "metadata": {
+                        "createdAt": timestamp
+                    }
+                }
+            ]
+        }
+
+    async def parse_event_stream(self, response):
+        event_type = None
+        data_lines = []
+
+        async for raw_line in response.content:
+            line = raw_line.decode("utf-8").rstrip("\r\n")
+
+            if line == "":
+                if event_type is not None:
+                    yield event_type, "\n".join(data_lines)
+                event_type = None
+                data_lines = []
+                continue
+
+            if line.startswith("event:"):
+                event_type = line[len("event:"):].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[len("data:"):].lstrip())
+
+    def format_ai_response(self, response: dict, width: int = 100, indent: str = "    "):
+        if not response or "actions" not in response:
+            return f"{Fore.RED+Style.BRIGHT}No response content{Style.RESET_ALL}"
+
+        lines = []
+
+        for action in response["actions"]:
+            content = action.get("content", "")
+            suggestions = action.get("suggestions", [])
+
+            lines.append(self.format_content_block(content, width=width, indent=indent))
+
+            if suggestions:
+                lines.append("")
+                lines.append(f"{indent}{Fore.MAGENTA+Style.BRIGHT}Suggestions:{Style.RESET_ALL}")
+                for s in suggestions:
+                    lines.append(f"{indent}  {Fore.CYAN}→{Style.RESET_ALL} {s}")
+
+        return "\n".join(lines)
+
+    def format_content_block(self, content: str, width: int, indent: str) -> str:
+        paragraphs = content.split("\n\n")
+        rendered = []
+
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+
+            for line in para.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+
+                if line.startswith("- "):
+                    bullet_text = self.apply_bold(line[2:])
+                    bullet = f"{indent}{Fore.YELLOW}•{Style.RESET_ALL} {bullet_text}"
+                    wrapped = textwrap.fill(
+                        bullet,
+                        width=width,
+                        subsequent_indent=indent + "  ",
+                        break_long_words=False,
+                        replace_whitespace=False,
+                    )
+                else:
+                    text = self.apply_bold(line)
+                    wrapped = textwrap.fill(
+                        text,
+                        width=width,
+                        initial_indent=indent,
+                        subsequent_indent=indent,
+                        break_long_words=False,
+                        replace_whitespace=False,
+                    )
+                rendered.append(wrapped)
+
+            rendered.append("")
+
+        return "\n".join(rendered).rstrip()
+
+    def apply_bold(self, text: str) -> str:
+        return re.sub(
+            r"\*\*(.+?)\*\*",
+            lambda m: f"{Fore.GREEN+Style.BRIGHT}{m.group(1)}{Style.RESET_ALL}",
+            text,
+        )
+        
+    def decode_token(self, address: str, type: str = "access"):
+        try:
+            if type == "refresh":
+                token = self.accounts[address]["refresh_token"]
+            else:
+                token = self.accounts[address]["access_token"]
+
+            header, payload, signature = token.split(".")
+            decoded_payload = urlsafe_b64decode(payload + "==").decode("utf-8")
+            parsed_payload = json.loads(decoded_payload)
+            exp_time = parsed_payload["exp"]
+            
+            return exp_time
+        except Exception as e:
+            return None
 
     def mask_account(self, account):
         try:
@@ -316,7 +588,7 @@ class heyAura:
         return None
     
     async def websites_props(self, address: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/api/props/websites"
+        url = f"{self.API['hub']}/api/props/websites"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
@@ -345,7 +617,7 @@ class heyAura:
         return None
     
     async def auth_csrf(self, address: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/api/auth/csrf"
+        url = f"{self.API['hub']}/api/auth/csrf"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
@@ -374,7 +646,7 @@ class heyAura:
         return None
     
     async def auth_credentials(self, private_key: str, address: str, csrf_token: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/api/auth/callback/credentials"
+        url = f"{self.API['hub']}/api/auth/callback/credentials"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
@@ -383,7 +655,7 @@ class heyAura:
                 headers["Content-Type"] = "application/json"
                 headers["X-Requested-With"] = "XMLHttpRequest"
                 cookies = self.accounts[address].get("cookies", {})
-                payload = self.generate_payload(private_key, address, csrf_token)
+                payload = self.generate_hub_payload(private_key, address, csrf_token)
 
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.post(
@@ -406,7 +678,7 @@ class heyAura:
         return None
 
     async def loyality_accounts(self, address: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/api/loyalty/accounts"
+        url = f"{self.API['hub']}/api/loyalty/accounts"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
@@ -439,7 +711,7 @@ class heyAura:
         return None
 
     async def loyality_rules(self, address: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/api/loyalty/rules"
+        url = f"{self.API['hub']}/api/loyalty/rules"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
@@ -475,7 +747,7 @@ class heyAura:
         return None
     
     async def complete_checkin(self, address: str, rules_id: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/api/loyalty/rules/{rules_id}/complete"
+        url = f"{self.API['hub']}/api/loyalty/rules/{rules_id}/complete"
         
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
@@ -507,6 +779,167 @@ class heyAura:
                 self.log(
                     f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
                     f"{Fore.RED+Style.BRIGHT} Failed {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
+                )
+
+        return None
+    
+    async def login_message(self, address: str, proxy_url=None, retries=5):
+        url = f"{self.API['ai']}/auth/login-msg"
+        
+        for attempt in range(retries):
+            connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
+            try:
+                headers = self.initialize_headers(address, "ai")
+                headers["Content-Type"] = "application/json"
+                payload = {
+                    "wallet": address,
+                    "chainId": 1
+                }
+
+                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                    async with session.post(
+                        url=url, headers=headers, json=payload, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
+                        return await response.json()
+            except (Exception, ClientResponseError) as e:
+                if attempt < retries - 1:
+                    await asyncio.sleep(5)
+                    continue
+                self.log(
+                    f"{Fore.BLUE+Style.BRIGHT}   Status  :{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Failed to Fetch Auth Message {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
+                )
+
+        return None
+    
+    async def login_verify(self, private_key: str, address: str, auth_message: str, proxy_url=None, retries=5):
+        url = f"{self.API['ai']}/auth/login-verify"
+        
+        for attempt in range(retries):
+            connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
+            try:
+                headers = self.initialize_headers(address, "ai")
+                headers["Content-Type"] = "application/json"
+                payload = self.generate_ai_payload(private_key, auth_message)
+
+                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                    async with session.post(
+                        url=url, headers=headers, json=payload, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
+                        return await response.json()
+            except (Exception, ClientResponseError) as e:
+                if attempt < retries - 1:
+                    await asyncio.sleep(5)
+                    continue
+                self.log(
+                    f"{Fore.BLUE+Style.BRIGHT}   Status  :{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Failed to Authenticating {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
+                )
+
+        return None
+    
+    async def refresh_token(self, address: str, proxy_url=None, retries=5):
+        url = f"{self.API['ai']}/auth/refresh-token"
+        
+        for attempt in range(retries):
+            connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
+            try:
+                headers = self.initialize_headers(address, "ai")
+                headers["Content-Type"] = "application/json"
+                payload = {
+                    "refreshToken": self.accounts[address]["refresh_token"]
+                }
+
+                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                    async with session.post(
+                        url=url, headers=headers, json=payload, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
+                        return await response.json()
+            except (Exception, ClientResponseError) as e:
+                if attempt < retries - 1:
+                    await asyncio.sleep(5)
+                    continue
+                self.log(
+                    f"{Fore.BLUE+Style.BRIGHT}   Status  :{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Failed to Refreshing Token {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
+                )
+
+        return None
+    
+    async def chat_sessions(self, address: str, prompt: str, proxy_url=None, retries=5):
+        url = f"{self.API['ai']}/chat-sessions"
+        
+        for attempt in range(retries):
+            connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
+            try:
+                headers = self.initialize_headers(address, "ai")
+                headers["Authorization"] = f"Bearer {self.accounts[address]['access_token']}"
+                headers["Content-Type"] = "application/json"
+                payload = {
+                    "name": self.generate_chat_session_name(prompt)
+                }
+
+                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                    async with session.post(
+                        url=url, headers=headers, json=payload, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
+                        return await response.json()
+            except (Exception, ClientResponseError) as e:
+                if attempt < retries - 1:
+                    await asyncio.sleep(5)
+                    continue
+                self.log(
+                    f"{Fore.BLUE+Style.BRIGHT}   Session :{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Failed to Preparing Chat {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
+                )
+
+        return None
+    
+    async def submit_prompt(self, address: str, prompt: str, session_id: str, proxy_url=None, retries=5):
+        url = f"{self.API['ai']}/prompt"
+        
+        for attempt in range(retries):
+            connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
+            try:
+                headers = self.initialize_headers(address, "ai")
+                headers["Authorization"] = f"Bearer {self.accounts[address]['access_token']}"
+                headers["Content-Type"] = "application/json"
+                payload = self.generate_submit_prompt_payload(address, prompt, session_id)
+
+                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                    async with session.post(
+                        url=url, headers=headers, json=payload, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
+                        result = None
+                        async for event_type, data in self.parse_event_stream(response):
+                            if not data:
+                                continue
+                            if event_type == "done":
+                                result = json.loads(data)
+
+                        return result
+            except (Exception, ClientResponseError) as e:
+                if attempt < retries - 1:
+                    await asyncio.sleep(5)
+                    continue
+                self.log(
+                    f"{Fore.BLUE+Style.BRIGHT}   Response:{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Failed to Submit Prompt {Style.RESET_ALL}"
                     f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
                     f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
                 )
@@ -570,6 +1003,61 @@ class heyAura:
         )
 
         return True
+    
+    async def process_authenticating(self, private_key: str, address: str, proxy_url=None):
+        if not self.accounts[address].get("access_token"):
+            message = await self.login_message(address, proxy_url)
+            if not message: return False
+
+            auth_message = message.get("authMsg")
+
+            verify = await self.login_verify(private_key, address, auth_message, proxy_url)
+            if not verify: return False
+
+            self.accounts[address]["access_token"] = verify.get("accessToken")
+            self.accounts[address]["refresh_token"] = verify.get("refreshToken")
+
+            self.log(
+                f"{Fore.BLUE + Style.BRIGHT}   Status  :{Style.RESET_ALL}"
+                f"{Fore.GREEN + Style.BRIGHT} Authenticated {Style.RESET_ALL}"
+            )
+
+        else:
+            access_exp_time = self.decode_token(address)
+            if int(time.time()) > access_exp_time:
+
+                refresh_exp_time = self.decode_token(address, "refresh")
+                if int(time.time()) > refresh_exp_time:
+
+                    message = await self.login_message(address, proxy_url)
+                    if not message: return False
+
+                    auth_message = message.get("authMsg")
+
+                    verify = await self.login_verify(private_key, address, auth_message, proxy_url)
+                    if not verify: return False
+
+                    self.accounts[address]["access_token"] = verify.get("accessToken")
+                    self.accounts[address]["refresh_token"] = verify.get("refreshToken")
+
+                    self.log(
+                        f"{Fore.BLUE + Style.BRIGHT}   Status  :{Style.RESET_ALL}"
+                        f"{Fore.GREEN + Style.BRIGHT} Authenticated {Style.RESET_ALL}"
+                    )
+
+                else:
+                    refresh = await self.refresh_token(address, proxy_url)
+                    if not refresh: return False
+
+                    self.accounts[address]["access_token"] = refresh.get("accessToken")
+                    self.accounts[address]["refresh_token"] = refresh.get("refreshToken")
+
+                    self.log(
+                        f"{Fore.BLUE + Style.BRIGHT}   Status  :{Style.RESET_ALL}"
+                        f"{Fore.GREEN + Style.BRIGHT} Token Refreshed {Style.RESET_ALL}"
+                    )
+
+        return True
 
     async def process_accounts(self, private_key: str, address: str, proxy_url=None):
         logined = await self.process_user_login(private_key, address, proxy_url)
@@ -613,6 +1101,31 @@ class heyAura:
                     f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
                     f"{Fore.YELLOW+Style.BRIGHT} Rules Id Not Found {Style.RESET_ALL}"
                 )
+        
+        self.log(f"{Fore.CYAN+Style.BRIGHT}AI Chat :{Style.RESET_ALL}")
+
+        if await self.process_authenticating(private_key, address, proxy_url):
+            prompt = self.generate_prompt()
+            self.log(
+                f"{Fore.BLUE + Style.BRIGHT}   Prompt  :{Style.RESET_ALL}"
+                f"{Fore.WHITE + Style.BRIGHT} {prompt} {Style.RESET_ALL}"
+            )
+
+            session = await self.chat_sessions(address, prompt, proxy_url)
+            if session:
+                session_id = session.get("_id")
+
+                self.log(
+                    f"{Fore.BLUE+Style.BRIGHT}   Session :{Style.RESET_ALL}"
+                    f"{Fore.WHITE+Style.BRIGHT} {session_id} {Style.RESET_ALL}"
+                )
+
+                response = await self.submit_prompt(address, prompt, session_id, proxy_url)
+                if response:
+                    self.log(
+                        f"{Fore.BLUE + Style.BRIGHT}   Response:{Style.RESET_ALL}\n"
+                        f"{Fore.WHITE + Style.BRIGHT}{self.format_ai_response(response)}{Style.RESET_ALL}"
+                    )
 
     async def main(self):
         try:

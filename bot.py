@@ -162,7 +162,7 @@ class heyAura:
         else:
             return today_target + timedelta(days=1)
     
-    def extract_cookies(self, idx: str, response: object):
+    def extract_cookies(self, idx: int, response: object):
         existing = self.accounts[idx].get("cookies", {})
         
         jar = SimpleCookie()
@@ -179,7 +179,7 @@ class heyAura:
 
         return self.accounts[idx]["cookies"]
     
-    def initialize_headers(self, idx: str, type: str = "hub"):
+    def initialize_headers(self, idx: int, type: str = "hub"):
         if type == "ai":
             headers = {
                 "Accept": "*/*",
@@ -593,7 +593,7 @@ class heyAura:
         
         return None
     
-    async def websites_props(self, idx: str, proxy_url=None, retries=5):
+    async def websites_props(self, idx: int, proxy_url=None, retries=5):
         url = f"{self.API['hub']}/api/props/websites"
         
         for attempt in range(retries):
@@ -622,7 +622,7 @@ class heyAura:
 
         return None
     
-    async def auth_csrf(self, idx: str, proxy_url=None, retries=5):
+    async def auth_csrf(self, idx: int, proxy_url=None, retries=5):
         url = f"{self.API['hub']}/api/auth/csrf"
         
         for attempt in range(retries):
@@ -651,7 +651,7 @@ class heyAura:
 
         return None
     
-    async def auth_credentials(self, idx: str, csrf_token: str, proxy_url=None, retries=5):
+    async def auth_credentials(self, idx: int, csrf_token: str, proxy_url=None, retries=5):
         url = f"{self.API['hub']}/api/auth/callback/credentials"
         
         for attempt in range(retries):
@@ -683,7 +683,7 @@ class heyAura:
 
         return None
 
-    async def loyality_accounts(self, idx: str, proxy_url=None, retries=5):
+    async def loyality_accounts(self, idx: int, proxy_url=None, retries=5):
         url = f"{self.API['hub']}/api/loyalty/accounts"
         
         for attempt in range(retries):
@@ -716,7 +716,7 @@ class heyAura:
 
         return None
 
-    async def loyality_rules(self, idx: str, proxy_url=None, retries=5):
+    async def loyality_rules(self, idx: int, proxy_url=None, retries=5):
         url = f"{self.API['hub']}/api/loyalty/rules"
         
         for attempt in range(retries):
@@ -752,7 +752,7 @@ class heyAura:
 
         return None
     
-    async def complete_checkin(self, idx: str, rules_id: str, proxy_url=None, retries=5):
+    async def complete_checkin(self, idx: int, rules_id: str, proxy_url=None, retries=5):
         url = f"{self.API['hub']}/api/loyalty/rules/{rules_id}/complete"
         
         for attempt in range(retries):
@@ -791,7 +791,7 @@ class heyAura:
 
         return None
     
-    async def login_message(self, idx: str, proxy_url=None, retries=5):
+    async def login_message(self, idx: int, proxy_url=None, retries=5):
         url = f"{self.API['ai']}/auth/login-msg"
         
         for attempt in range(retries):
@@ -823,7 +823,7 @@ class heyAura:
 
         return None
     
-    async def login_verify(self, idx: str, auth_message: str, proxy_url=None, retries=5):
+    async def login_verify(self, idx: int, auth_message: str, proxy_url=None, retries=5):
         url = f"{self.API['ai']}/auth/login-verify"
         
         for attempt in range(retries):
@@ -852,7 +852,7 @@ class heyAura:
 
         return None
     
-    async def refresh_token(self, idx: str, proxy_url=None, retries=5):
+    async def refresh_token(self, idx: int, proxy_url=None, retries=5):
         url = f"{self.API['ai']}/auth/refresh-token"
         
         for attempt in range(retries):
@@ -883,7 +883,7 @@ class heyAura:
 
         return None
     
-    async def chat_sessions(self, idx: str, prompt: str, proxy_url=None, retries=5):
+    async def chat_sessions(self, idx: int, prompt: str, proxy_url=None, retries=5):
         url = f"{self.API['ai']}/chat-sessions"
         
         for attempt in range(retries):
@@ -915,7 +915,7 @@ class heyAura:
 
         return None
     
-    async def submit_prompt(self, idx: str, prompt: str, session_id: str, proxy_url=None, retries=5):
+    async def submit_prompt(self, idx: int, prompt: str, session_id: str, proxy_url=None, retries=5):
         url = f"{self.API['ai']}/prompt"
         
         for attempt in range(retries):
@@ -952,7 +952,7 @@ class heyAura:
 
         return None
     
-    async def process_check_connection(self, idx: str, proxy_url=None):
+    async def process_check_connection(self, idx: int, proxy_url=None):
         while True:
             if self.USE_PROXY:
                 proxy_url = self.get_next_proxy_for_account(idx)
@@ -972,7 +972,7 @@ class heyAura:
 
             return False
     
-    async def process_user_login(self, idx: str, proxy_url=None):
+    async def process_user_login(self, idx: int, proxy_url=None):
         is_valid = await self.process_check_connection(idx, proxy_url)
         if not is_valid: return False
 
@@ -1010,7 +1010,7 @@ class heyAura:
 
         return True
     
-    async def process_authenticating(self, idx: str, proxy_url=None):
+    async def process_authenticating(self, idx: int, proxy_url=None):
         if not self.accounts[idx].get("access_token"):
             message = await self.login_message(idx, proxy_url)
             if not message: return False
@@ -1065,7 +1065,7 @@ class heyAura:
 
         return True
 
-    async def process_accounts(self, idx: str, proxy_url=None):
+    async def process_accounts(self, idx: int, proxy_url=None):
         logined = await self.process_user_login(idx, proxy_url)
         if not logined: return False
 
